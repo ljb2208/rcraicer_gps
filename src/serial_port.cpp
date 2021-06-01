@@ -7,7 +7,7 @@
 #include <sys/ioctl.h>
 #include <linux/usbdevice_fs.h>
 
-SerialPort::SerialPort(std::string port, int baudRate): port_fd(-1), port_setting_error(""), connected(false), alive(false)
+SerialPort::SerialPort(std::string port, int baudRate): port_fd(-1), port_setting_error(""), connected(false), alive(false), dataCallback(NULL)
 {
     this->port = port;    
 
@@ -60,7 +60,8 @@ void SerialPort::run()
 
           for (int i=0; i < received; i++)
           {            
-            dataCallback(data[i]);                                                                        
+            if (dataCallback != NULL)
+              dataCallback(data[i]);                                                                          
           }
 
           dataMutex.unlock();                             

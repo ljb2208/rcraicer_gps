@@ -1,7 +1,9 @@
 # include <stdint.h>
+
 #include "sensor_msgs/msg/nav_sat_fix.hpp"
 #include "sensor_msgs/msg/nav_sat_status.hpp"
 #include "rcraicer_msgs/msg/gps_status.hpp"
+#include "rcraicer_msgs/msg/gps_survey.hpp"
 
 #define UBX_SYNC1             0xB5
 #define UBX_SYNC2             0x62
@@ -15,16 +17,10 @@
 #define UBX_CLASS_MON         0x0A
 #define UBX_CLASS_RTCM3       0xF5
 
-/* Message Classes */
-#define UBX_CLASS_NAV         0x01
-#define UBX_CLASS_RXM         0x02
-#define UBX_CLASS_INF         0x04
-#define UBX_CLASS_ACK         0x05
-#define UBX_CLASS_CFG         0x06
-#define UBX_CLASS_MON         0x0A
-#define UBX_CLASS_RTCM3       0xF5
-
 /* Message IDs */
+#define UBX_ID_NAV_COV		  0x36
+#define UBX_ID_NAV_STATUS	  0x03
+#define UBX_ID_NAV_SIG		  0x43
 #define UBX_ID_NAV_POSLLH     0x02
 #define UBX_ID_NAV_DOP        0x04
 #define UBX_ID_NAV_SOL        0x06
@@ -76,6 +72,9 @@
 
 
 /* Message Classes & IDs */
+#define UBX_MSG_NAV_COV 	  ((UBX_CLASS_NAV) | UBX_ID_NAV_COV << 8)
+#define UBX_MSG_NAV_STATUS 	  ((UBX_CLASS_NAV) | UBX_ID_NAV_STATUS << 8)
+#define UBX_MSG_NAV_SIG  	  ((UBX_CLASS_NAV) | UBX_ID_NAV_SIG << 8)
 #define UBX_MSG_NAV_POSLLH    ((UBX_CLASS_NAV) | UBX_ID_NAV_POSLLH << 8)
 #define UBX_MSG_NAV_SOL       ((UBX_CLASS_NAV) | UBX_ID_NAV_SOL << 8)
 #define UBX_MSG_NAV_DOP       ((UBX_CLASS_NAV) | UBX_ID_NAV_DOP << 8)
@@ -184,6 +183,27 @@ typedef struct {
 	uint16_t nDOP; /**< Northing DOP [0.01] */
 	uint16_t eDOP; /**< Easting DOP [0.01] */
 } ubx_payload_rx_nav_dop_t;
+
+/* Rx NAV-COV */
+typedef struct {
+	uint32_t	iTOW; /**< GPS Time of Week [ms] */
+	uint8_t		version;
+	uint8_t		posCorValid;
+	uint8_t		velCorValid;
+	uint8_t		reserved0[9];
+	float 		posCovNN; // - m^2 Position covariance matrix value p_NN
+	float 		posCovNE; // - m^2 Position covariance matrix value p_NE
+	float 		posCovND; // - m^2 Position covariance matrix value p_ND
+	float 		posCovEE; // - m^2 Position covariance matrix value p_EE
+	float 		posCovED; // - m^2 Position covariance matrix value p_ED
+	float 		posCovDD; // - m^2 Position covariance matrix value p_DD
+	float 		velCovNN; // - m^2/s^2 Velocity covariance matrix value v_NN
+	float 		velCovNE; // - m^2/s^2 Velocity covariance matrix value v_NE
+	float 		velCovND; // - m^2/s^2 Velocity covariance matrix value v_ND
+	float 		velCovEE; // - m^2/s^2 Velocity covariance matrix value v_EE
+	float 		velCovED; // - m^2/s^2 Velocity covariance matrix value v_ED
+	float 		velCovDD; // - m^2/s^2 Velocity covariance matrix value v_DD		
+} ubx_payload_rx_nav_cov_t;
 
 /* Rx NAV-SOL */
 typedef struct {
@@ -586,6 +606,7 @@ typedef union {
 	ubx_payload_rx_nav_sat_part2_t    payload_rx_nav_sat_part2;
 	ubx_payload_rx_nav_svin_t         payload_rx_nav_svin;
 	ubx_payload_rx_nav_velned_t       payload_rx_nav_velned;
+	ubx_payload_rx_nav_cov_t       	  payload_rx_nav_cov;
 	ubx_payload_rx_mon_hw_ubx6_t      payload_rx_mon_hw_ubx6;
 	ubx_payload_rx_mon_hw_ubx7_t      payload_rx_mon_hw_ubx7;
 	ubx_payload_rx_mon_rf_t           payload_rx_mon_rf;
@@ -644,16 +665,27 @@ typedef enum {
 class UbxProtocol
 {
     public:
-        UbxProtocol();
+        UbxProtocol(bool msgDebug);
         ~UbxProtocol();
 
         int parseChar(const uint8_t b);
+
+		bool gpsStatusMessageReady();
+		bool gpsSurveyMessageReady();
+		bool navSatStatusMessageReady();
+		bool navSatFixMessageReady();
+
+		rcraicer_msgs::msg::GPSSurvey getGpsSurveyMessage();
+		rcraicer_msgs::msg::GPSStatus getGpsStatusMessage();
+		sensor_msgs::msg::NavSatFix getNavSatFixMessage();
+		sensor_msgs::msg::NavSatStatus getNavSatStatusMessage();
 
     private:
         void decodeInit();
         void clearGPSStatusMsg();
 
         void addByteToChecksum(const uint8_t b);
+		void outputMsgType();
         
         int payloadRxInit();
         int payloadRxAdd(const uint8_t b);
@@ -670,11 +702,21 @@ class UbxProtocol
 
         ubx_rxmsg_state_t   rx_state{UBX_RXMSG_IGNORE};
 
-        bool configured{false};
-        bool use_nav_pvt{false};
+        bool configured{true};
+        bool use_nav_pvt{true};
+
+		bool isGpsStatusMsgReady{false};
+		bool isGpsSurveyMsgReady{false};
+		bool isNavSatFixMsgReady{false};
+		bool isNavSatStatusMsgReady{false};
+
+		bool msgDebug;
+		
 
         rcraicer_msgs::msg::GPSStatus gpsStatusMsg;
+		rcraicer_msgs::msg::GPSSurvey gpsSurveyMsg;
         sensor_msgs::msg::NavSatFix fixMsg;        
+		sensor_msgs::msg::NavSatStatus statusMsg;        
 
 
         ubx_buf_t   buf{};

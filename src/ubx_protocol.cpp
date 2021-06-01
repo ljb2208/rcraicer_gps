@@ -1,8 +1,12 @@
 #include "../include/rcraicer_gps/ubx_protocol.h"
+#include <iostream>
+#include <cstring>
 
-UbxProtocol::UbxProtocol()
+UbxProtocol::UbxProtocol(bool msgDebug)
 {
-
+    this->msgDebug = msgDebug;
+    configured = true;
+    use_nav_pvt = true;
 }
 
 UbxProtocol::~UbxProtocol()
@@ -41,6 +45,7 @@ int UbxProtocol::parseChar(const uint8_t b)
             addByteToChecksum(b);
             rx_msg |= b << 8;
             decode_state = UBX_DECODE_LENGTH1;
+            outputMsgType();
             break;
         case UBX_DECODE_LENGTH1:
             addByteToChecksum(b);
@@ -117,7 +122,7 @@ int UbxProtocol::payloadRxInit()  // -1 = abort, 0 = continue
             clearGPSStatusMsg();
             break;
 
-        case UBX_MSG_NAV_PVT:
+        case UBX_MSG_NAV_PVT:            
             if ((rx_payload_length != UBX_PAYLOAD_RX_NAV_PVT_SIZE_UBX7)		/* u-blox 7 msg format */
                 && (rx_payload_length != UBX_PAYLOAD_RX_NAV_PVT_SIZE_UBX8)) {	/* u-blox 8+ msg format */
                 rx_state = UBX_RXMSG_ERROR_LENGTH;
@@ -174,6 +179,26 @@ int UbxProtocol::payloadRxInit()  // -1 = abort, 0 = continue
 
             break;
 
+        case UBX_MSG_NAV_SVIN:
+            if (rx_payload_length != sizeof(ubx_payload_rx_nav_svin_t)) {
+                rx_state = UBX_RXMSG_ERROR_LENGTH;
+
+            } else if (!configured) {
+                rx_state = UBX_RXMSG_IGNORE;        // ignore if not _configured
+
+            }
+
+            break;
+        
+        case UBX_MSG_NAV_COV:
+            if (rx_payload_length != sizeof(ubx_payload_rx_nav_cov_t)) {
+                rx_state = UBX_RXMSG_ERROR_LENGTH;
+            }else if (!configured) {
+                rx_state = UBX_RXMSG_IGNORE;        // ignore if not _configured
+
+            }
+            break;
+
         case UBX_MSG_NAV_RELPOSNED:
             if (rx_payload_length != sizeof(ubx_payload_rx_nav_relposned_t)) {
                 rx_state = UBX_RXMSG_ERROR_LENGTH;
@@ -197,10 +222,32 @@ int UbxProtocol::payloadRxInit()  // -1 = abort, 0 = continue
             }
 
             break;
-
-
+        default:
+            rx_state = UBX_RXMSG_DISABLE;	// disable all other messages
+            break;
     }
-    return ret;
+
+    switch (rx_state) {
+	case UBX_RXMSG_HANDLE:	// handle message
+	case UBX_RXMSG_IGNORE:	// ignore message but don't report error
+		ret = 0;
+		break;
+
+	case UBX_RXMSG_DISABLE:	// disable unexpected messages
+		ret = -1;	// return error, abort handling this message
+		break;
+
+	case UBX_RXMSG_ERROR_LENGTH:	// error: invalid length
+		ret = -1;	// return error, abort handling this message
+		break;
+
+	default:	// invalid message state
+		ret = -1;	// return error, abort handling this message
+		break;
+	}
+
+	return ret;   
+
 }
 
 int UbxProtocol::payloadRxAdd(const uint8_t b)
@@ -336,46 +383,178 @@ int UbxProtocol::payloadRxAddNavSat(const uint8_t b)
 	return ret;
 }
 
+void UbxProtocol::outputMsgType()
+{
+    if (!msgDebug)
+        return;
+        
+    uint8_t mt1, mt2;
+
+    mt2 = rx_msg >> 8;
+    mt1 = rx_msg;    
+
+    switch(rx_msg)
+    {
+        case UBX_MSG_NAV_SIG:
+            std::cout <<"UBX_MSG_NAV_SIG" << "\r\n";
+            break;            
+
+        case UBX_MSG_NAV_COV:
+            std::cout <<"UBX_MSG_NAV_COV" << "\r\n";
+            break;           
+
+        case UBX_MSG_NAV_VELNED:
+            std::cout <<"UBX_MSG_NAV_VELNED" << "\r\n";
+            break;           
+
+        case UBX_MSG_NAV_SVIN:
+            std::cout <<"UBX_MSG_NAV_SVIN" << "\r\n";
+            break;            
+        
+        case UBX_MSG_NAV_STATUS:
+            std::cout <<"UBX_MSG_NAV_STATUS" << "\r\n";
+            break;            
+
+        case UBX_MSG_NAV_DOP:
+            std::cout <<"UBX_MSG_NAV_DOP" << "\r\n";
+            break;            
+
+        case UBX_MSG_NAV_POSLLH:
+            std::cout <<"UBX_MSG_NAV_POSLLH" << "\r\n";
+            break;            
+
+        case UBX_MSG_NAV_PVT:
+            std::cout <<"UBX_MSG_NAV_PVT" << "\r\n";
+            break;            
+
+        case UBX_MSG_NAV_SAT:
+            std::cout <<"UBX_MSG_NAV_SAT" << "\r\n";
+            break;            
+        
+        case UBX_MSG_NAV_TIMEUTC:
+            std::cout <<"UBX_MSG_NAV_TIMEUTC" << "\r\n";
+            break;            
+
+        case UBX_MSG_NAV_RELPOSNED:
+            std::cout <<"UBX_MSG_NAV_RELPOSNED" << "\r\n";
+            break;            
+        
+        case UBX_MSG_MON_RF:
+            std::cout <<"UBX_MSG_MON_RF" << "\r\n";
+            break;            
+        
+        default:
+             std::cout << "Message type: " << (int)mt1 << " : " << (int)mt2 << "\r\n";
+             break;        
+    }
+}
+
 int UbxProtocol::payloadRxDone()
 {
-    int ret = 0;
+    int ret = 0;    
+
+
 
 	// return if no message handled
 	if (rx_state != UBX_RXMSG_HANDLE) {
 		return ret;
 	}
 
+
     switch(rx_msg)
     {
+        case UBX_MSG_NAV_SVIN:
+            gpsSurveyMsg.mean_x = buf.payload_rx_nav_svin.meanX;
+            gpsSurveyMsg.mean_y = buf.payload_rx_nav_svin.meanY;
+            gpsSurveyMsg.mean_z = buf.payload_rx_nav_svin.meanZ;
+
+            gpsSurveyMsg.observations = buf.payload_rx_nav_svin.obs;
+            gpsSurveyMsg.duration = buf.payload_rx_nav_svin.dur;
+
+            gpsSurveyMsg.accuracy = (float) buf.payload_rx_nav_svin.meanAcc / 10000; // convert to metres
+
+            gpsSurveyMsg.active = buf.payload_rx_nav_svin.active;
+            gpsSurveyMsg.valid = buf.payload_rx_nav_svin.valid;
+            
+            isGpsSurveyMsgReady = true;
+
+            break;
+        case UBX_MSG_NAV_DOP:
+            gpsStatusMsg.hdop = (float)buf.payload_rx_nav_dop.hDOP / 100.0;
+            gpsStatusMsg.vdop = (float)buf.payload_rx_nav_dop.vDOP / 100.0;
+            gpsStatusMsg.pdop = (float)buf.payload_rx_nav_dop.pDOP / 100.0;
+
+            break;
+
+        case UBX_MSG_NAV_COV:
+            fixMsg.position_covariance_type =  sensor_msgs::msg::NavSatFix::COVARIANCE_TYPE_UNKNOWN;
+
+            if ((buf.payload_rx_nav_cov.posCorValid == 1))
+            {
+                fixMsg.position_covariance_type =  sensor_msgs::msg::NavSatFix::COVARIANCE_TYPE_KNOWN;
+
+                // convert from NED to ENU
+                fixMsg.position_covariance.at(0) = buf.payload_rx_nav_cov.posCovEE;
+                fixMsg.position_covariance.at(1) = buf.payload_rx_nav_cov.posCovNE;
+                fixMsg.position_covariance.at(2) = buf.payload_rx_nav_cov.posCovED;
+
+                fixMsg.position_covariance.at(3) = buf.payload_rx_nav_cov.posCovNE;
+                fixMsg.position_covariance.at(4) = buf.payload_rx_nav_cov.posCovNN;
+                fixMsg.position_covariance.at(5) = buf.payload_rx_nav_cov.posCovND;
+
+                fixMsg.position_covariance.at(6) = buf.payload_rx_nav_cov.posCovED;
+                fixMsg.position_covariance.at(7) = buf.payload_rx_nav_cov.posCovND;
+                fixMsg.position_covariance.at(8) = buf.payload_rx_nav_cov.posCovDD;
+
+            }
+            break;
         case UBX_MSG_NAV_PVT:
+
+            std::cout << "UBX_MSG_NAV_PVT\r\n";
+            gpsStatusMsg.rtk_status = rcraicer_msgs::msg::GPSStatus::RTK_STATUS_NONE;
+
             //Check if position fix flag is good
             if ((buf.payload_rx_nav_pvt.flags & UBX_RX_NAV_PVT_FLAGS_GNSSFIXOK) == 1) {                
                 gpsStatusMsg.status = rcraicer_msgs::msg::GPSStatus::STATUS_FIX;
+                fixMsg.status.status = sensor_msgs::msg::NavSatStatus::STATUS_FIX;
 
                 if (buf.payload_rx_nav_pvt.flags & UBX_RX_NAV_PVT_FLAGS_DIFFSOLN) {                    
                     gpsStatusMsg.status = rcraicer_msgs::msg::GPSStatus::STATUS_DGPS_FIX;
+                    fixMsg.status.status = sensor_msgs::msg::NavSatStatus::STATUS_SBAS_FIX;
                 }
 
                 uint8_t carr_soln = buf.payload_rx_nav_pvt.flags >> 6;
 
                 if (carr_soln == 1) {
+                    fixMsg.status.status = sensor_msgs::msg::NavSatStatus::STATUS_GBAS_FIX;
+                    gpsStatusMsg.rtk_status = rcraicer_msgs::msg::GPSStatus::RTK_STATUS_FLOAT;
                     // _gps_position->fix_type = 5; //Float RTK
 
                 } else if (carr_soln == 2) {
+                    fixMsg.status.status = sensor_msgs::msg::NavSatStatus::STATUS_GBAS_FIX;
+                    gpsStatusMsg.rtk_status = rcraicer_msgs::msg::GPSStatus::RTK_STATUS_FIXED;
                     // _gps_position->fix_type = 6; //Fixed RTK
                 }
 
                 // _gps_position->vel_ned_valid = true;
 
             } else {
+                gpsStatusMsg.status = rcraicer_msgs::msg::GPSStatus::STATUS_NO_FIX;
                 fixMsg.status.status = rcraicer_msgs::msg::GPSStatus::STATUS_NO_FIX;                
             }
             
 
-		    fixMsg.latitude	= buf.payload_rx_nav_pvt.lat;
-		    fixMsg.longitude = buf.payload_rx_nav_pvt.lon;
-		    fixMsg.altitude = buf.payload_rx_nav_pvt.height;
+		    fixMsg.latitude	= buf.payload_rx_nav_pvt.lat / 1e7; // convert  to degrees
+		    fixMsg.longitude = buf.payload_rx_nav_pvt.lon  / 1e7; // copnvert to degrees
+		    fixMsg.altitude = buf.payload_rx_nav_pvt.height /1000; // convert to metres from mm
 
+            isGpsStatusMsgReady = true;
+            isNavSatFixMsgReady = true;
+
+            break;
+
+        case UBX_MSG_NAV_TIMEUTC:
+            // std::cout << "UBX_MSG_NAV_PVT\r\n";
             break;
 
     }
@@ -390,6 +569,10 @@ void UbxProtocol::addByteToChecksum(const uint8_t b)
 void UbxProtocol::decodeInit()
 {
     decode_state = UBX_DECODE_SYNC1;
+    rx_ck_a = 0;
+	rx_ck_b = 0;
+	rx_payload_length = 0;
+	rx_payload_index = 0;
 }
 
 void UbxProtocol::clearGPSStatusMsg()
@@ -401,4 +584,48 @@ void UbxProtocol::clearGPSStatusMsg()
     gpsStatusMsg.satellite_visible_z.clear();
     gpsStatusMsg.satellite_visible_azimuth.clear();
     gpsStatusMsg.satellite_visible_snr.clear();
+}
+
+bool UbxProtocol::gpsStatusMessageReady()
+{
+    return isGpsStatusMsgReady;
+}
+
+bool UbxProtocol::gpsSurveyMessageReady()
+{
+    return isGpsSurveyMsgReady;
+}
+
+bool UbxProtocol::navSatStatusMessageReady()
+{
+    return isNavSatStatusMsgReady;
+}
+
+bool UbxProtocol::navSatFixMessageReady()
+{
+    return isNavSatFixMsgReady;
+}
+
+rcraicer_msgs::msg::GPSStatus UbxProtocol::getGpsStatusMessage()
+{        
+    isGpsStatusMsgReady = false;
+    return gpsStatusMsg;
+}
+
+rcraicer_msgs::msg::GPSSurvey UbxProtocol::getGpsSurveyMessage()
+{        
+    isGpsSurveyMsgReady = false;
+    return gpsSurveyMsg;
+}
+
+sensor_msgs::msg::NavSatFix UbxProtocol::getNavSatFixMessage()
+{    
+    isNavSatFixMsgReady = false;
+    return fixMsg;
+}
+
+sensor_msgs::msg::NavSatStatus UbxProtocol::getNavSatStatusMessage()
+{    
+    isNavSatStatusMsgReady = false;
+    return statusMsg;
 }

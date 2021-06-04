@@ -4,20 +4,26 @@
 using std::placeholders::_1;
 using namespace std::chrono_literals;
 
-GPSNode::GPSNode() : Node("gps_node"), serialPort(NULL), ubxProto(NULL)
+GPSNode::GPSNode() : Node("gps_node"), ubxProto(NULL)
 {    
     this->declare_parameter<std::string>("serial_port", "/dev/ttyACM0");
-    this->declare_parameter<int>("baud_rate", 460800);
+    this->declare_parameter<int>("baud_rate", 460800);    
     this->declare_parameter<bool>("base", true);
-    this->declare_parameter<bool>("msg_debug", true);
+    this->declare_parameter<bool>("msg_debug", false);
+    this->declare_parameter<int>("base_svin_acc_limit", 2000); // millimeters
+    this->declare_parameter<int>("base_svin_min_duration", 120); // seconds
+
     this->declare_parameter<std::string>("frame_id", "gps_link");
 
     // init parameters
     portPath = this->get_parameter("serial_port");
     baudRate = this->get_parameter("baud_rate");
     isBase = this->get_parameter("base");
+    svInAcc = this->get_parameter("base_svin_acc_limit");
+    svInDur = this->get_parameter("base_svin_min_duration");
     frameId = this->get_parameter("frame_id");
-    msgDebug = this->get_parameter("msg_debug");
+    msgDebug = this->get_parameter("msg_debug");    
+
 
     std::string topicPrefix = "rover_";
 
@@ -31,65 +37,76 @@ GPSNode::GPSNode() : Node("gps_node"), serialPort(NULL), ubxProto(NULL)
         gpsSurveyPublisher = this->create_publisher<rcraicer_msgs::msg::GPSSurvey>(topicPrefix + "gps_survey", 10);
     
 
-    ubxProto = new UbxProtocol(msgDebug.as_bool());
+    ubxProto = new UbxProtocol(msgDebug.as_bool(), portPath.as_string(), baudRate.as_int(), isBase.as_bool());
+    ubxProto->registerMessageCallback(std::bind(&GPSNode::message_callback, this));
+    ubxProto->registerConfigurationCallback(std::bind(&GPSNode::configuration_callback, this));
 
-    serialPort = new SerialPort(portPath.as_string(), baudRate.as_int());
-    
-
-    if (serialPort->isConnected())
+    if (ubxProto->connect())
     {
-        RCLCPP_INFO(this->get_logger(), "Connected on %s @ %i", portPath.as_string().c_str(), 
-                                    baudRate.as_int());
+        RCLCPP_INFO(this->get_logger(), "Serial Port connected on %s at %i", portPath.as_string().c_str(), baudRate.as_int());
     }
 
-    serialPort->registerDataCallback(std::bind(&GPSNode::serial_data_callback, this, std::placeholders::_1));
+    ubxProto->configure();
+
+    if (isBase.as_bool() == true)
+    {
+        ubxProto->configureSurveyIn((uint32_t)svInDur.as_int(), (uint32_t)svInAcc.as_int());
+    }
 
 }
 
 GPSNode::~GPSNode()
-{
-    if (serialPort != NULL)
-        delete serialPort;
-
+{    
     if (ubxProto != NULL)
         delete ubxProto;
 }
 
-void GPSNode::serial_data_callback(const uint8_t data)
+void GPSNode::configuration_callback()
 {
-    int ret = ubxProto->parseChar(data);
-
-    if (ret != 0)
+    if (ubxProto->ackNackMessageReady())
     {
-        if (ubxProto->gpsStatusMessageReady())
-        {            
-            rcraicer_msgs::msg::GPSStatus msg = ubxProto->getGpsStatusMessage();
-            msg.header.stamp = this->get_clock()->now();
-            msg.header.frame_id = frameId.as_string();
-
-            gpsStatusPublisher->publish(msg);            
-        }
-
-        if (ubxProto->navSatFixMessageReady())
+        if (ubxProto->getAckStatus())
         {
-            sensor_msgs::msg::NavSatFix msg = ubxProto->getNavSatFixMessage();
-            msg.header.stamp = this->get_clock()->now();
-            msg.header.frame_id = frameId.as_string();
-
-            navSatFixPublisher->publish(msg);
-        }        
-
-        if (ubxProto->gpsSurveyMessageReady() && isBase.as_bool() == true)
-        {
-            rcraicer_msgs::msg::GPSSurvey msg = ubxProto->getGpsSurveyMessage();
-            msg.header.stamp = this->get_clock()->now();
-            msg.header.frame_id = frameId.as_string();
-
-            gpsSurveyPublisher->publish(msg);
+            RCLCPP_INFO(this->get_logger(), "Configuration successful");
         }
-    }    
+        else
+        {
+            RCLCPP_ERROR(this->get_logger(), "Configuration failed");
+        }
+    }
 }
 
+void GPSNode::message_callback()
+{
+    // int ret = ubxProto->parseChar(data);
+
+    if (ubxProto->gpsStatusMessageReady())
+    {            
+        rcraicer_msgs::msg::GPSStatus msg = ubxProto->getGpsStatusMessage();
+        msg.header.stamp = this->get_clock()->now();
+        msg.header.frame_id = frameId.as_string();
+
+        gpsStatusPublisher->publish(msg);            
+    }
+
+    if (ubxProto->navSatFixMessageReady())
+    {
+        sensor_msgs::msg::NavSatFix msg = ubxProto->getNavSatFixMessage();
+        msg.header.stamp = this->get_clock()->now();
+        msg.header.frame_id = frameId.as_string();
+
+        navSatFixPublisher->publish(msg);
+    }        
+
+    if (ubxProto->gpsSurveyMessageReady() && isBase.as_bool() == true)
+    {
+        rcraicer_msgs::msg::GPSSurvey msg = ubxProto->getGpsSurveyMessage();
+        msg.header.stamp = this->get_clock()->now();
+        msg.header.frame_id = frameId.as_string();
+
+        gpsSurveyPublisher->publish(msg);
+    }    
+}
 
 int main(int argc, char * argv[])
 {

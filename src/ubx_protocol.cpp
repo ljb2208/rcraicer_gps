@@ -2,16 +2,39 @@
 #include <iostream>
 #include <cstring>
 
-UbxProtocol::UbxProtocol(bool msgDebug)
+UbxProtocol::UbxProtocol(bool msgDebug, std::string portPath, int baudRate, bool baseStation) : serialPort(NULL)
 {
     this->msgDebug = msgDebug;
-    configured = true;
+    this->portPath = portPath;
+    this->baudRate = baudRate;
+    this->baseStation = baseStation;
+
+    configured = false;
     use_nav_pvt = true;
 }
 
 UbxProtocol::~UbxProtocol()
 {
+    if (serialPort != NULL)
+        delete serialPort;
+}
 
+bool UbxProtocol::connect()
+{
+    serialPort = new SerialPort(portPath, baudRate);
+    serialPort->registerDataCallback(std::bind(&UbxProtocol::serial_data_callback, this, std::placeholders::_1));    
+
+    if (serialPort->isConnected())
+    {
+        return true;
+    }
+
+    return false;    
+}
+
+void UbxProtocol::serial_data_callback(const uint8_t data)
+{
+    int ret = parseChar(data);
 }
 
 int UbxProtocol::parseChar(const uint8_t b)
@@ -120,6 +143,12 @@ int UbxProtocol::payloadRxInit()  // -1 = abort, 0 = continue
         case UBX_MSG_NAV_SAT:
             // clear data from GPS Status message in preparation for new data
             clearGPSStatusMsg();
+            break;
+
+        case UBX_MSG_ACK_ACK:
+            break;
+        
+        case UBX_MSG_ACK_NAK:
             break;
 
         case UBX_MSG_NAV_PVT:            
@@ -387,7 +416,7 @@ void UbxProtocol::outputMsgType()
 {
     if (!msgDebug)
         return;
-        
+
     uint8_t mt1, mt2;
 
     mt2 = rx_msg >> 8;
@@ -395,6 +424,14 @@ void UbxProtocol::outputMsgType()
 
     switch(rx_msg)
     {
+        case UBX_MSG_ACK_NAK:
+            std::cout <<"UBX_MSG_ACK_NAK" << "\r\n";
+            break;            
+
+        case UBX_MSG_ACK_ACK:
+            std::cout <<"UBX_MSG_ACK_ACK" << "\r\n";
+            break;            
+
         case UBX_MSG_NAV_SIG:
             std::cout <<"UBX_MSG_NAV_SIG" << "\r\n";
             break;            
@@ -463,6 +500,18 @@ int UbxProtocol::payloadRxDone()
 
     switch(rx_msg)
     {
+        case UBX_MSG_ACK_NAK:
+            acknowledged = false;
+            isAckNacReady = true;
+            configurationCallback();
+            break;
+
+        case UBX_MSG_ACK_ACK:
+            acknowledged = true;
+            isAckNacReady = true;
+            configurationCallback();
+            break;
+            
         case UBX_MSG_NAV_SVIN:
             gpsSurveyMsg.mean_x = buf.payload_rx_nav_svin.meanX;
             gpsSurveyMsg.mean_y = buf.payload_rx_nav_svin.meanY;
@@ -477,6 +526,7 @@ int UbxProtocol::payloadRxDone()
             gpsSurveyMsg.valid = buf.payload_rx_nav_svin.valid;
             
             isGpsSurveyMsgReady = true;
+            messageCallback();
 
             break;
         case UBX_MSG_NAV_DOP:
@@ -509,8 +559,7 @@ int UbxProtocol::payloadRxDone()
             }
             break;
         case UBX_MSG_NAV_PVT:
-
-            std::cout << "UBX_MSG_NAV_PVT\r\n";
+            
             gpsStatusMsg.rtk_status = rcraicer_msgs::msg::GPSStatus::RTK_STATUS_NONE;
 
             //Check if position fix flag is good
@@ -550,6 +599,7 @@ int UbxProtocol::payloadRxDone()
 
             isGpsStatusMsgReady = true;
             isNavSatFixMsgReady = true;
+            messageCallback();
 
             break;
 
@@ -606,6 +656,11 @@ bool UbxProtocol::navSatFixMessageReady()
     return isNavSatFixMsgReady;
 }
 
+bool UbxProtocol::ackNackMessageReady()
+{
+    return isAckNacReady;
+}
+
 rcraicer_msgs::msg::GPSStatus UbxProtocol::getGpsStatusMessage()
 {        
     isGpsStatusMsgReady = false;
@@ -629,3 +684,116 @@ sensor_msgs::msg::NavSatStatus UbxProtocol::getNavSatStatusMessage()
     isNavSatStatusMsgReady = false;
     return statusMsg;
 }
+
+bool UbxProtocol::getAckStatus()
+{
+    return acknowledged;
+}
+
+void UbxProtocol::configure()
+{    
+    // configured = true;
+    int cfg_valset_msg_size = initCfgValset();    
+
+    // disable NMEA output on USB
+    cfgValset<uint8_t>(UBX_CFG_KEY_CFG_USBOUTPROT_NMEA, 0, cfg_valset_msg_size);        
+
+    // set measurement rate to 10hz
+    cfgValset<uint16_t>(UBX_CFG_KEY_RATE_MEAS, 100, cfg_valset_msg_size);    
+
+    // set nav rate to 5hz
+    cfgValset<uint16_t>(UBX_CFG_KEY_RATE_NAV, 2, cfg_valset_msg_size);    
+
+
+    bool ret = sendMessage(UBX_MSG_CFG_VALSET, (uint8_t*)&txbuf, cfg_valset_msg_size);        
+
+    configured = true;
+}
+
+void UbxProtocol::configureSurveyIn(uint32_t minDuration, uint32_t accLimit)
+{
+    int cfg_valset_msg_size = initCfgValset();    
+
+    // set min duration (seconds)
+    cfgValset<uint32_t>(UBX_CFG_KEY_TMODE_SVIN_MIN_DUR, minDuration, cfg_valset_msg_size);    
+
+    // set acc limit (millimeters)
+    cfgValset<uint32_t>(UBX_CFG_KEY_TMODE_SVIN_ACC_LIMIT, accLimit, cfg_valset_msg_size);    
+
+    bool ret = sendMessage(UBX_MSG_CFG_VALSET, (uint8_t*)&txbuf, cfg_valset_msg_size);        
+}
+
+int UbxProtocol::initCfgValset()
+{
+	memset(&txbuf.payload_tx_cfg_valset, 0, sizeof(txbuf.payload_tx_cfg_valset));
+	txbuf.payload_tx_cfg_valset.layers = UBX_CFG_LAYER_RAM;    
+	return sizeof(txbuf.payload_tx_cfg_valset) - sizeof(txbuf.payload_tx_cfg_valset.cfgData);
+}
+
+template<typename T>
+bool UbxProtocol::cfgValset(uint32_t key_id, T value, int &msg_size)
+{
+	if (msg_size + sizeof(key_id) + sizeof(value) > sizeof(buf)) {
+		// If this happens use several CFG-VALSET messages instead of one		
+		return false;
+	}
+
+	uint8_t *buffer = (uint8_t *)&txbuf.payload_tx_cfg_valset;
+	memcpy(buffer + msg_size, &key_id, sizeof(key_id));
+	msg_size += sizeof(key_id);
+	memcpy(buffer + msg_size, &value, sizeof(value));
+	msg_size += sizeof(value);
+	return true;
+}
+
+bool UbxProtocol::sendMessage(const uint16_t msg, const uint8_t *payload, const uint16_t length)
+{
+    ubx_header_t   header = {UBX_SYNC1, UBX_SYNC2, 0, 0};
+	ubx_checksum_t checksum = {0, 0};
+
+	// Populate header
+	header.msg	= msg;
+	header.length	= length;
+
+	// Calculate checksum
+	calcChecksum(((uint8_t *)&header) + 2, sizeof(header) - 2, &checksum); // skip 2 sync bytes
+
+	if (payload != nullptr) {
+		calcChecksum(payload, length, &checksum);
+	}
+
+	// Send message
+	if (serialPort->writePort((uint8_t *)&header, sizeof(header)) != sizeof(header)) {
+		return false;
+	}
+
+	if (payload && serialPort->writePort((uint8_t *)payload, length) != length) {
+		return false;
+	}
+
+	if (serialPort->writePort((uint8_t *)&checksum, sizeof(checksum)) != sizeof(checksum)) {
+		return false;
+	}
+
+	return true;
+}
+
+void UbxProtocol::calcChecksum(const uint8_t *buffer, const uint16_t length, ubx_checksum_t *checksum)
+{
+	for (uint16_t i = 0; i < length; i++) {
+		checksum->ck_a = checksum->ck_a + buffer[i];
+		checksum->ck_b = checksum->ck_b + checksum->ck_a;
+	}
+}
+
+
+void UbxProtocol::registerMessageCallback(MessageCallback callback)
+{
+    messageCallback = callback;
+}
+
+void UbxProtocol::registerConfigurationCallback(ConfigurationCallback callback)
+{
+    configurationCallback = callback;
+}
+

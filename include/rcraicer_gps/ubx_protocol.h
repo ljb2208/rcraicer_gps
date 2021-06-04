@@ -4,6 +4,8 @@
 #include "sensor_msgs/msg/nav_sat_status.hpp"
 #include "rcraicer_msgs/msg/gps_status.hpp"
 #include "rcraicer_msgs/msg/gps_survey.hpp"
+#include "serial_port.h"
+#include <functional>
 
 #define UBX_SYNC1             0xB5
 #define UBX_SYNC2             0x62
@@ -143,6 +145,17 @@
 #define UBX_RX_NAV_TIMEUTC_VALID_VALIDKWN       0x02    /**< validWKN (1 = Valid Week Number) */
 #define UBX_RX_NAV_TIMEUTC_VALID_VALIDUTC       0x04    /**< validUTC (1 = Valid UTC Time) */
 #define UBX_RX_NAV_TIMEUTC_VALID_UTCSTANDARD    0xF0    /**< utcStandard (0..15 = UTC standard identifier) */
+
+#define UBX_CFG_LAYER_RAM                       (1 << 0)
+#define UBX_CFG_LAYER_BBR                       (1 << 1)
+#define UBX_CFG_LAYER_FLASH                     (1 << 2)
+
+#define UBX_CFG_KEY_RATE_MEAS                   0x30210001
+#define UBX_CFG_KEY_RATE_NAV                    0x30210002
+#define UBX_CFG_KEY_CFG_USBOUTPROT_NMEA         0x10780002
+#define UBX_CFG_KEY_NAVHPG_DGNSSMODE            0x20140011
+#define UBX_CFG_KEY_TMODE_SVIN_MIN_DUR          0x40030010
+#define UBX_CFG_KEY_TMODE_SVIN_ACC_LIMIT        0x40030011
 
 /*** u-blox protocol binary message and payload definitions ***/
 #pragma pack(push, 1)
@@ -665,22 +678,37 @@ typedef enum {
 class UbxProtocol
 {
     public:
-        UbxProtocol(bool msgDebug);
+        UbxProtocol(bool msgDebug, std::string portPath, int baudRate, bool baseStation);
         ~UbxProtocol();
 
         int parseChar(const uint8_t b);
 
+		bool ackNackMessageReady();
 		bool gpsStatusMessageReady();
 		bool gpsSurveyMessageReady();
 		bool navSatStatusMessageReady();
 		bool navSatFixMessageReady();
+
+		bool getAckStatus();
 
 		rcraicer_msgs::msg::GPSSurvey getGpsSurveyMessage();
 		rcraicer_msgs::msg::GPSStatus getGpsStatusMessage();
 		sensor_msgs::msg::NavSatFix getNavSatFixMessage();
 		sensor_msgs::msg::NavSatStatus getNavSatStatusMessage();
 
+		typedef std::function<void()> MessageCallback;
+		typedef std::function<void()> ConfigurationCallback;
+
+		void registerMessageCallback(MessageCallback callback);
+		void registerConfigurationCallback(ConfigurationCallback callback);
+
+		bool connect();
+		void configure();
+		void configureSurveyIn(uint32_t minDuration, uint32_t accLimit);
+
     private:
+		SerialPort* serialPort;
+		void serial_data_callback(const uint8_t data);
         void decodeInit();
         void clearGPSStatusMsg();
 
@@ -692,6 +720,18 @@ class UbxProtocol
 	    int payloadRxAddMonVer(const uint8_t b);
 	    int payloadRxAddNavSat(const uint8_t b);
         int payloadRxDone(void);
+
+		bool sendMessage(const uint16_t msg, const uint8_t *payload, const uint16_t length);
+		void calcChecksum(const uint8_t *buffer, const uint16_t length, ubx_checksum_t *checksum);
+
+		int initCfgValset();
+		template<typename T>
+			bool cfgValset(uint32_t key_id, T value, int &msg_size);
+
+
+		std::string portPath;
+		int baudRate;
+		bool baseStation;
   
         ubx_decode_state_t  decode_state{};
         uint16_t rx_msg{};
@@ -702,16 +742,21 @@ class UbxProtocol
 
         ubx_rxmsg_state_t   rx_state{UBX_RXMSG_IGNORE};
 
-        bool configured{true};
+        bool configured{false};
         bool use_nav_pvt{true};
 
 		bool isGpsStatusMsgReady{false};
 		bool isGpsSurveyMsgReady{false};
 		bool isNavSatFixMsgReady{false};
 		bool isNavSatStatusMsgReady{false};
+		bool isAckNacReady{false};
+
+		bool acknowledged = false;
 
 		bool msgDebug;
-		
+
+		MessageCallback messageCallback;
+		ConfigurationCallback configurationCallback;		
 
         rcraicer_msgs::msg::GPSStatus gpsStatusMsg;
 		rcraicer_msgs::msg::GPSSurvey gpsSurveyMsg;
@@ -720,5 +765,6 @@ class UbxProtocol
 
 
         ubx_buf_t   buf{};
+		ubx_buf_t   txbuf{};
 
 };

@@ -1,3 +1,6 @@
+#ifndef _SERIAL_PORT_H
+#define _SERIAL_PORT_H
+
 #include <string>
 
 #include <mutex>
@@ -56,3 +59,5 @@ class SerialPort
         DataCallback dataCallback; ///< Callback triggered when new data arrives
         volatile bool alive;
 };
+
+#endif

@@ -1,4 +1,5 @@
 # include <stdint.h>
+#include <string>
 
 #include "sensor_msgs/msg/nav_sat_fix.hpp"
 #include "sensor_msgs/msg/nav_sat_status.hpp"
@@ -156,6 +157,14 @@
 #define UBX_CFG_KEY_NAVHPG_DGNSSMODE            0x20140011
 #define UBX_CFG_KEY_TMODE_SVIN_MIN_DUR          0x40030010
 #define UBX_CFG_KEY_TMODE_SVIN_ACC_LIMIT        0x40030011
+
+#define UBX_CFG_KEY_INFMSG_UBX_USB 				0x20920004
+
+#define UBX_CFG_INF_MSG_ERROR					(1 << 1)
+#define UBX_CFG_INF_MSG_WARN					(1 << 2)
+#define UBX_CFG_INF_MSG_NOTICE					(1 << 4)
+#define UBX_CFG_INF_MSG_ERROR_WARN_NOTICE		(1 << 7)
+
 
 /*** u-blox protocol binary message and payload definitions ***/
 #pragma pack(push, 1)
@@ -688,6 +697,8 @@ class UbxProtocol
 		bool gpsSurveyMessageReady();
 		bool navSatStatusMessageReady();
 		bool navSatFixMessageReady();
+		bool debugMessageReady();
+		bool warningMessageReady();
 
 		bool getAckStatus();
 
@@ -695,6 +706,9 @@ class UbxProtocol
 		rcraicer_msgs::msg::GPSStatus getGpsStatusMessage();
 		sensor_msgs::msg::NavSatFix getNavSatFixMessage();
 		sensor_msgs::msg::NavSatStatus getNavSatStatusMessage();
+
+		std::string getDebugMessage();
+		std::string getWarningMessage();
 
 		typedef std::function<void()> MessageCallback;
 		typedef std::function<void()> ConfigurationCallback;
@@ -750,6 +764,8 @@ class UbxProtocol
 		bool isNavSatFixMsgReady{false};
 		bool isNavSatStatusMsgReady{false};
 		bool isAckNacReady{false};
+		bool isDebugMessageReady{false};
+		bool isWarningMessageReady{false};
 
 		bool acknowledged = false;
 
@@ -766,5 +782,8 @@ class UbxProtocol
 
         ubx_buf_t   buf{};
 		ubx_buf_t   txbuf{};
+
+		std::string debugMessage;
+		std::string warningMessage;
 
 };

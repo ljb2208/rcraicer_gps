@@ -104,8 +104,20 @@ void GPSNode::message_callback()
         msg.header.stamp = this->get_clock()->now();
         msg.header.frame_id = frameId.as_string();
 
-        gpsSurveyPublisher->publish(msg);
+        gpsSurveyPublisher->publish(msg);        
     }    
+
+    if (ubxProto->warningMessageReady())
+    {
+        std::string msg = ubxProto->getWarningMessage();
+        RCLCPP_WARN(this->get_logger(), "Warning/Error: %s", msg.c_str());
+    }
+
+    if (ubxProto->debugMessageReady())
+    {
+        std::string msg = ubxProto->getDebugMessage();
+        RCLCPP_INFO(this->get_logger(), "Debug/Notice: %s", msg.c_str());
+    }
 }
 
 int main(int argc, char * argv[])

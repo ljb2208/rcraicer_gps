@@ -603,6 +603,24 @@ int UbxProtocol::payloadRxDone()
 
             break;
 
+        case UBX_MSG_INF_DEBUG:
+        case UBX_MSG_INF_NOTICE: {
+                uint8_t *p_buf = (uint8_t *)&buf;
+                p_buf[rx_payload_length] = 0;
+                debugMessage = reinterpret_cast<char *>(p_buf);
+                isDebugMessageReady = true;
+            }
+            break;
+
+        case UBX_MSG_INF_ERROR:
+        case UBX_MSG_INF_WARNING: {
+                uint8_t *p_buf = (uint8_t *)&buf;
+                p_buf[rx_payload_length] = 0;
+                warningMessage = reinterpret_cast<char *>(p_buf);
+                isWarningMessageReady = true;
+            }
+            break;
+
         case UBX_MSG_NAV_TIMEUTC:
             // std::cout << "UBX_MSG_NAV_PVT\r\n";
             break;
@@ -704,6 +722,9 @@ void UbxProtocol::configure()
     // set nav rate to 5hz
     cfgValset<uint16_t>(UBX_CFG_KEY_RATE_NAV, 2, cfg_valset_msg_size);    
 
+    // set inf messages
+    cfgValset<uint8_t>(UBX_CFG_KEY_INFMSG_UBX_USB, UBX_CFG_INF_MSG_ERROR_WARN_NOTICE, cfg_valset_msg_size); 
+    
 
     bool ret = sendMessage(UBX_MSG_CFG_VALSET, (uint8_t*)&txbuf, cfg_valset_msg_size);        
 
@@ -797,3 +818,24 @@ void UbxProtocol::registerConfigurationCallback(ConfigurationCallback callback)
     configurationCallback = callback;
 }
 
+std::string UbxProtocol::getDebugMessage()
+{
+    isDebugMessageReady = false;
+    return debugMessage;
+}
+
+std::string UbxProtocol::getWarningMessage()
+{
+    isWarningMessageReady = false;
+    return warningMessage;
+}
+
+bool UbxProtocol::debugMessageReady()
+{
+    return isDebugMessageReady;
+}
+
+bool UbxProtocol::warningMessageReady()
+{
+    return isWarningMessageReady;
+}

@@ -9,6 +9,7 @@ GPSNode::GPSNode() : Node("gps_node"), ubxProto(NULL)
     this->declare_parameter<std::string>("serial_port", "/dev/ttyACM0");
     this->declare_parameter<int>("baud_rate", 460800);    
     this->declare_parameter<bool>("base", true);
+    this->declare_parameter<bool>("output_rf", true);
     this->declare_parameter<bool>("msg_debug", false);
     this->declare_parameter<int>("base_svin_acc_limit", 2000); // millimeters
     this->declare_parameter<int>("base_svin_min_duration", 120); // seconds
@@ -23,6 +24,7 @@ GPSNode::GPSNode() : Node("gps_node"), ubxProto(NULL)
     svInDur = this->get_parameter("base_svin_min_duration");
     frameId = this->get_parameter("frame_id");
     msgDebug = this->get_parameter("msg_debug");    
+    outputRf = this->get_parameter("output_rf");
 
 
     std::string topicPrefix = "rover_";
@@ -32,6 +34,9 @@ GPSNode::GPSNode() : Node("gps_node"), ubxProto(NULL)
 
     navSatFixPublisher = this->create_publisher<sensor_msgs::msg::NavSatFix>(topicPrefix + "navsat_fix", 10);
     gpsStatusPublisher = this->create_publisher<rcraicer_msgs::msg::GPSStatus>(topicPrefix + "gps_status", 10);    
+
+    if (outputRf.as_bool())
+        gpsRFStatusPublisher = this->create_publisher<rcraicer_msgs::msg::GPSRFStatus>(topicPrefix + "gps_rf_status", 10);    
 
     if (isBase.as_bool() == true)
         gpsSurveyPublisher = this->create_publisher<rcraicer_msgs::msg::GPSSurvey>(topicPrefix + "gps_survey", 10);
@@ -117,6 +122,14 @@ void GPSNode::message_callback()
     {
         std::string msg = ubxProto->getDebugMessage();
         RCLCPP_INFO(this->get_logger(), "Debug/Notice: %s", msg.c_str());
+    }
+
+    if (ubxProto->rfMessageReady() && outputRf.as_bool())
+    {        
+        rcraicer_msgs::msg::GPSRFStatus msg = ubxProto->getGpsRFMessage();
+        msg.header.stamp = this->get_clock()->now();
+        msg.header.frame_id = frameId.as_string();
+        gpsRFStatusPublisher->publish(msg);
     }
 }
 

@@ -251,6 +251,17 @@ int UbxProtocol::payloadRxInit()  // -1 = abort, 0 = continue
             }
 
             break;
+        case UBX_MSG_MON_RF:
+            if (rx_payload_length < sizeof(ubx_payload_rx_mon_rf_t)) {// ||
+                //(rx_payload_length - 4) % sizeof(ubx_payload_rx_mon_rf_t::ubx_payload_rx_mon_rf_block_t) != 0) {
+
+                rx_state = UBX_RXMSG_ERROR_LENGTH;
+
+            } else if (!configured) {
+                rx_state = UBX_RXMSG_IGNORE;        // ignore if not _configured
+            }
+
+            break;
         default:
             rx_state = UBX_RXMSG_DISABLE;	// disable all other messages
             break;
@@ -621,6 +632,22 @@ int UbxProtocol::payloadRxDone()
             }
             break;
 
+        case UBX_MSG_MON_RF:
+            gpsRFMsg.block1_jamming = buf.payload_rx_mon_rf.block1.flags;
+            gpsRFMsg.block1_antenna_status  = buf.payload_rx_mon_rf.block1.antStatus;
+            gpsRFMsg.block1_antenna_power  = buf.payload_rx_mon_rf.block1.antPower;
+            gpsRFMsg.block1_noise  = buf.payload_rx_mon_rf.block1.noisePerMS;
+            gpsRFMsg.block1_jamming_ind = buf.payload_rx_mon_rf.block1.jamInd;
+
+            gpsRFMsg.block2_jamming = buf.payload_rx_mon_rf.block2.flags;
+            gpsRFMsg.block2_antenna_status  = buf.payload_rx_mon_rf.block2.antStatus;
+            gpsRFMsg.block2_antenna_power  = buf.payload_rx_mon_rf.block2.antPower;
+            gpsRFMsg.block2_noise  = buf.payload_rx_mon_rf.block2.noisePerMS;
+            gpsRFMsg.block2_jamming_ind = buf.payload_rx_mon_rf.block2.jamInd;
+
+            isRFMessageReady = true;
+
+
         case UBX_MSG_NAV_TIMEUTC:
             // std::cout << "UBX_MSG_NAV_PVT\r\n";
             break;
@@ -724,6 +751,9 @@ void UbxProtocol::configure()
 
     // set inf messages
     cfgValset<uint8_t>(UBX_CFG_KEY_INFMSG_UBX_USB, UBX_CFG_INF_MSG_ERROR_WARN_NOTICE, cfg_valset_msg_size); 
+
+    // set jamming detection
+    cfgValset<uint8_t>(UBX_CFG_ITFM_ENABLE, 1, cfg_valset_msg_size); 
     
 
     bool ret = sendMessage(UBX_MSG_CFG_VALSET, (uint8_t*)&txbuf, cfg_valset_msg_size);        
@@ -830,6 +860,12 @@ std::string UbxProtocol::getWarningMessage()
     return warningMessage;
 }
 
+rcraicer_msgs::msg::GPSRFStatus UbxProtocol::getGpsRFMessage()
+{
+    isRFMessageReady = false;
+    return gpsRFMsg;
+}
+
 bool UbxProtocol::debugMessageReady()
 {
     return isDebugMessageReady;
@@ -838,4 +874,9 @@ bool UbxProtocol::debugMessageReady()
 bool UbxProtocol::warningMessageReady()
 {
     return isWarningMessageReady;
+}
+
+bool UbxProtocol::rfMessageReady()
+{
+    return isRFMessageReady;
 }

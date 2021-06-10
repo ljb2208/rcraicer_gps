@@ -5,6 +5,7 @@
 #include "sensor_msgs/msg/nav_sat_status.hpp"
 #include "rcraicer_msgs/msg/gps_status.hpp"
 #include "rcraicer_msgs/msg/gps_survey.hpp"
+#include "rcraicer_msgs/msg/gpsrf_status.hpp"
 #include "serial_port.h"
 #include <functional>
 
@@ -159,6 +160,8 @@
 #define UBX_CFG_KEY_TMODE_SVIN_ACC_LIMIT        0x40030011
 
 #define UBX_CFG_KEY_INFMSG_UBX_USB 				0x20920004
+
+#define UBX_CFG_ITFM_ENABLE						0x1041000d
 
 #define UBX_CFG_INF_MSG_ERROR					(1 << 1)
 #define UBX_CFG_INF_MSG_WARN					(1 << 2)
@@ -435,7 +438,8 @@ typedef struct {
 		uint8_t  reserved3[3];
 	};
 
-	ubx_payload_rx_mon_rf_block_t block[1]; ///< only read out the first block
+	ubx_payload_rx_mon_rf_block_t block1; 
+	ubx_payload_rx_mon_rf_block_t block2; 
 } ubx_payload_rx_mon_rf_t;
 
 /* Rx MON-VER Part 1 */
@@ -699,11 +703,13 @@ class UbxProtocol
 		bool navSatFixMessageReady();
 		bool debugMessageReady();
 		bool warningMessageReady();
+		bool rfMessageReady();
 
 		bool getAckStatus();
 
 		rcraicer_msgs::msg::GPSSurvey getGpsSurveyMessage();
 		rcraicer_msgs::msg::GPSStatus getGpsStatusMessage();
+		rcraicer_msgs::msg::GPSRFStatus getGpsRFMessage();
 		sensor_msgs::msg::NavSatFix getNavSatFixMessage();
 		sensor_msgs::msg::NavSatStatus getNavSatStatusMessage();
 
@@ -766,6 +772,7 @@ class UbxProtocol
 		bool isAckNacReady{false};
 		bool isDebugMessageReady{false};
 		bool isWarningMessageReady{false};
+		bool isRFMessageReady{false};
 
 		bool acknowledged = false;
 
@@ -776,6 +783,7 @@ class UbxProtocol
 
         rcraicer_msgs::msg::GPSStatus gpsStatusMsg;
 		rcraicer_msgs::msg::GPSSurvey gpsSurveyMsg;
+		rcraicer_msgs::msg::GPSRFStatus gpsRFMsg;
         sensor_msgs::msg::NavSatFix fixMsg;        
 		sensor_msgs::msg::NavSatStatus statusMsg;        
 
